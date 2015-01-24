@@ -28,10 +28,12 @@ public class BlackmanApplet extends JApplet {
 
 	private Double[] frequencies;
 	private double fs = 8000;
-	private double fc_min = 1; // Cannot be zero, calculating the blackman
+	private double fc_min = 250; // Cannot be zero, calculating the blackman
 									// filter will cause NaN values
-	private double fc_max = 1000;
-	private double delta_f = 500;
+	private double fc_max = 750;
+	private double delta_f = 250; // transition width
+	
+	private double signal_frequency = 500;
 
 	private double[] windowArray;
 	private double[] filterArray;
@@ -47,43 +49,47 @@ public class BlackmanApplet extends JApplet {
 		try {
 			SwingUtilities.invokeAndWait(new Runnable() {
 				public void run() {
+
 					
-					// Run tests
-					try {
-						tests();
-					} catch(Exception e) {
-						System.out.println(e.getMessage());
-						return;
-					}
-					
+					// Generate signal
 					double Ts = 1 / fs;
-					double signal_frequency = 250;
 					double[] y = new double[(int) (Math.ceil((1 - Ts) / Ts))];
 					for (int i = 0; i < y.length; i++) {
 						double t = i * Ts;
 						y[i] = 2 * Math.sin(2 * Math.PI * signal_frequency * t);
 					}
 
-					// Make one main panel
+					// Make one main panel and plots
 					JPanel mainPanel = new JPanel();
-
 					Plot2DPanel plot1 = new Plot2DPanel();
-					plot1.addLinePlot("signal", Color.blue, y);
 					Plot2DPanel plot2 = new Plot2DPanel();
 					Plot2DPanel plot3 = new Plot2DPanel();
-					double[] fourrierValues = centeredFFT(y, fs);
-					plot2.addLinePlot("fourier", freqDouble(), fourrierValues);
-					double[] windowdata = generateWindowData(false);
-					double[] windowed = convolute(y, windowdata);
-					double[] windowedFourrierValues = centeredFFT(windowed, fs);
-					plot2.addLinePlot("filter", Color.red, freqDouble(),
-							windowedFourrierValues);
-					//plot3.addLinePlot("test", centeredFFT(windowArray,fs));
-					plot3.addLinePlot("moretes", filterArray);
 
+					// Plot signal
+					plot1.addLinePlot("Signal", Color.blue, y);
+					
+					// Plot fourrier and filtered fourrier
+					double[] fourrierValues = centeredFFT(y, fs);
+					plot2.addLinePlot("Transformed signal", freqDouble(), fourrierValues);
+					double[] filterData = generateFilterData();
+					double[] filterecSignal = convolute(y, filterData);
+					double[] filterdSignalFourrierValues = centeredFFT(filterecSignal, fs);
+					plot2.addLinePlot("Filtered transformed signal", Color.red, freqDouble(),
+							filterdSignalFourrierValues);
+					
+					
+					double[] windowTransformed = centeredFFT(filterData, fs);
+					plot3.addLinePlot("test", freqDouble(), windowTransformed);
+					//plot3.addLinePlot("Filter", windowdata);
+
+					// GUI specific
 					plot1.setPreferredSize(new Dimension(350, 500));
 					plot2.setPreferredSize(new Dimension(350, 500));
 					plot3.setPreferredSize(new Dimension(350, 500));
+					plot1.setAxisLabel(0, "Time");
+					plot1.setAxisLabel(1, "Signal");
+					plot2.setAxisLabel(0, "Frequency (Hz)");
+					plot2.setAxisLabel(1, "Amplitude");
 					mainPanel.setLayout(new BorderLayout());
 					mainPanel.add(plot1, BorderLayout.WEST);
 					mainPanel.add(plot2);
@@ -98,6 +104,7 @@ public class BlackmanApplet extends JApplet {
 		}
 	}
 
+	// Centered FFT as described in the exercices
 	public double[] centeredFFT(double[] data, double sampling_frequency) {
 
 		double N = data.length * 2;
@@ -145,6 +152,7 @@ public class BlackmanApplet extends JApplet {
 		return returnData;
 	}
 
+	// Convert frequencies array from Double[] to double[]
 	private double[] freqDouble() {
 		double[] r = new double[frequencies.length];
 		for (int i = 0; i < frequencies.length; i++) {
@@ -153,32 +161,39 @@ public class BlackmanApplet extends JApplet {
 		return r;
 	}
 
-	// Generates window data for blackman window
-	private double[] generateWindowData(boolean test) {
+	// Generates filter data, this is a bandpass filter using the blackman window 
+	private double[] generateFilterData() {
+		// Normalize transition width
 		double d_f = delta_f / fs;
-		double N = test ? 10 : Math.ceil(5.5 / d_f);// See wpo 6-8 document page 18 for
+		double N = Math.ceil(5.5 / d_f); // Window specification
 		double[] ret = new double[(int) N];
 		windowArray = new double[(int) N];
 		filterArray = new double[(int) N];
 		double window, filter;
 		int index = 0;
 		for (double i = -(N - 1) / 2; i < (N - 1) / 2; i = i + 1) {
+			// Calculate window
 			window = ALPHA0 - (ALPHA1 * Math.cos(2 * Math.PI * index / (N - 1)))
-					+ (ALPHA2 * Math.cos(4 * Math.PI * index / (N - 1)));
-			// window = 1;
+					+ (ALPHA2 * Math.cos(4 * Math.PI * index / (N - 1))); 
+			// Calculate filter
 			filter = this.filter(i, d_f);
-			//filter = filterLowPass(i);
+			
+			// Save them in seperate arrays for debugging purposes
 			windowArray[index] = window;
 			filterArray[index] = filter;
+			
+			// Multiply filter and window
 			ret[index] = window * filter;
 			index++;
 		}
 		return ret;
 	}
 
-	// Zie wpo 6-8 document
+	// Bandpass filter
 	private double filter(double n, double d_f) {
 		double pi = Math.PI;
+		
+		//
 		double f1 = (fc_min / fs) + (d_f/2);
 		double f2 = (fc_max / fs) + (d_f/2);
 		if (n == 0) {
@@ -191,19 +206,9 @@ public class BlackmanApplet extends JApplet {
 		}
 	}
 
-	// Zie wpo 6-8 document
-	private double filterLowPass(double n) {
-		double pi = Math.PI;
-		if (n == 0) {
-			return 2 * (fc_max);
-		} else {
-			return (2 * fc_max * (Math.sin(n * 2 * pi * fc_max) / (n * 2 * pi * fc_max)));
 
-		}
-	}
-
-	// Check http://www.songho.ca/dsp/convolution/convolution.html#definition
-	// Kernel = window
+	// Convolution function
+	// Original C version http://www.songho.ca/dsp/convolution/convolution.html#definition
 	private double[] convolute(double[] input, double[] kernel) {
 		double[] ret = new double[input.length];
 		int kernelSize = kernel.length;
@@ -224,77 +229,6 @@ public class BlackmanApplet extends JApplet {
 				ret[i] += input[j] * kernel[k];
 		}
 		return ret;
-	}
-
-	private double[] convoluteNew(double[] signal, double[] filter) {
-		double[] ret = new double[signal.length];
-
-		for (int i = 0; i < signal.length; ++i) {
-
-			double sum_hk_and_signal = 0;
-
-			double M = Math.min(filter.length, i + 1);
-
-			for (int k = 0; k < M; ++k) {
-
-				double h_of_k = filter[k];
-
-				sum_hk_and_signal += h_of_k * filter[i - k];
-
-			}
-
-			ret[i] = sum_hk_and_signal;
-		}
-
-		return ret;
-	}
-
-	private void tests() throws Exception {
-		
-		//Arrayaprox
-		double[] i1 = {4,5.000000000001, 6.999999999999999};
-		double[] i2 = {4,5,7};
-		if(!arrayAprox(i1, i2)) {
-			throw new Exception("arrayAprox failed");
-		}
-		
-		// Convolute
-		double[] input1 = { 1, 2, 3, 4, 5 };
-		double[] input2 = { 6, 5, 7 };
-		double[] output = { 6, 17, 35, 53, 71};
-		if(!arrayAprox(convolute(input1, input2), output)) {
-			throw new Exception("Convolution failed");
-		}
-		
-		// window
-		double[] output2 = {  -0.00000,
-				  0.05087,
-				  0.25800,
-				  0.63000,
-				  0.95113,
-				  0.95113,
-				  0.63000,
-				  0.25800,
-				  0.05087,
-				  -0.00000};
-		double[] tst = generateWindowData(true);
-		if(!arrayAprox(windowArray, output2)) {
-			throw new Exception("Window calculation failed");
-		}
-
-	}
-	
-	private boolean arrayAprox(double[] ar1,double[] ar2) {
-		if(ar1.length != ar2.length) return false;
-		for(int i=0;i<ar1.length;i++) {
-			if(((double)Math.round(ar1[i] * 100000) / 100000) == ((double)Math.round(ar2[i] * 100000) / 100000)) {
-				continue;
-			}else {
-				System.out.println(((double)Math.round(ar1[i] * 10000) / 10000) + " where " + ar2[i]);
-				return false;
-			}
-		}
-		return true;
 	}
 
 }
